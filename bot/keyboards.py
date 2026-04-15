@@ -1,5 +1,13 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from config import SUPPORTED_CHAINS
+
+
+def menu_button() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Меню")]],
+        resize_keyboard=True,
+        persistent=True,
+    )
 
 
 def main_menu() -> InlineKeyboardMarkup:

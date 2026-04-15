@@ -17,7 +17,7 @@ from db.database import (
     seed_seen_txs,
 )
 from scanner.moralis import get_wallet_transfers
-from bot.keyboards import main_menu, wallets_list, chains_keyboard, cancel_button
+from bot.keyboards import main_menu, wallets_list, chains_keyboard, cancel_button, menu_button
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -58,6 +58,13 @@ WELCOME_TEXT = (
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("👋", reply_markup=menu_button())
+    await message.answer(WELCOME_TEXT, parse_mode="HTML", reply_markup=main_menu())
+
+
+@router.message(F.text == "Меню")
+async def cmd_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(WELCOME_TEXT, parse_mode="HTML", reply_markup=main_menu())
 

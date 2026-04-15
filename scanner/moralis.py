@@ -29,7 +29,7 @@ async def get_wallet_transfers(address: str, chains: list, limit: int = 20) -> l
             continue
 
         moralis_chain = MORALIS_CHAIN_MAP.get(chain, chain)
-        url = f"{MORALIS_BASE}/wallets/{address}/nfts/transfers"
+        url = f"{MORALIS_BASE}/{address}/nft/transfers"
         params = {
             "chain": moralis_chain,
             "limit": limit,

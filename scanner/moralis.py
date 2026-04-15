@@ -100,6 +100,7 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
         token_id = transfer.get("token_id") or ""
         quantity = int(transfer.get("amount") or 1)
         contract_address = transfer.get("token_address") or ""
+        block_timestamp = transfer.get("block_timestamp") or ""
 
         return {
             "event_type": event_type,
@@ -113,6 +114,7 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
             "token_id": token_id,
             "quantity": quantity,
             "contract_address": contract_address,
+            "block_timestamp": block_timestamp,
         }
     except Exception as e:
         logger.error(f"Error parsing transfer: {e}")

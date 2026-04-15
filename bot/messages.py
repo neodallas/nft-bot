@@ -1,4 +1,23 @@
+from datetime import datetime, timezone
 from config import SUPPORTED_CHAINS
+
+UA_MONTHS = {
+    1: "січ", 2: "лют", 3: "бер", 4: "квіт",
+    5: "трав", 6: "черв", 7: "лип", 8: "серп",
+    9: "вер", 10: "жовт", 11: "лист", 12: "груд",
+}
+
+
+def format_timestamp(ts: str) -> str:
+    """Convert ISO 8601 timestamp to Ukrainian date string."""
+    if not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc)
+        month = UA_MONTHS[dt.month]
+        return f"{dt.day} {month} {dt.year}, {dt.strftime('%H:%M')} UTC"
+    except Exception:
+        return ""
 
 CHAIN_EXPLORERS = {
     "ethereum": "https://etherscan.io/tx/",
@@ -52,6 +71,11 @@ def format_alert(data: dict, wallet_name: str) -> str:
         lines.append(f"Маркетплейс: {data['marketplace']}")
 
     lines.append(f"Мережа: {chain_display}")
+
+    ts = format_timestamp(data.get("block_timestamp", ""))
+    if ts:
+        lines.append(f"🕐 {ts}")
+
     lines.append("—————")
 
     # Links

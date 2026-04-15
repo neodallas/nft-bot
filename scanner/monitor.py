@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramRetryAfter
 
 from db.database import get_all_wallets, is_tx_seen, mark_tx_seen, cleanup_old_txs
 from scanner.moralis import get_wallet_transfers, parse_transfer
@@ -49,6 +49,7 @@ async def scan_wallets(bot: Bot):
 
                 for user in data["users"]:
                     await _send_alert(bot, user["user_id"], parsed, user["name"] or address)
+                    await asyncio.sleep(0.5)  # затримка між повідомленнями
 
         except Exception as e:
             logger.error(f"Error scanning wallet {address}: {e}")
@@ -58,20 +59,28 @@ async def scan_wallets(bot: Bot):
 
 async def _send_alert(bot: Bot, user_id: int, event: dict, wallet_name: str):
     text = format_alert(event, wallet_name)
-    try:
-        await bot.send_message(
-            user_id,
-            text,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except TelegramForbiddenError:
-        # User blocked the bot — nothing we can do
-        logger.info(f"User {user_id} blocked the bot, skipping alert")
-    except TelegramBadRequest as e:
-        logger.warning(f"Bad request sending alert to {user_id}: {e}")
-    except Exception as e:
-        logger.error(f"Failed to send alert to {user_id}: {e}")
+    for attempt in range(3):
+        try:
+            await bot.send_message(
+                user_id,
+                text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            return
+        except TelegramRetryAfter as e:
+            wait = e.retry_after + 1
+            logger.warning(f"Flood control, чекаємо {wait}с...")
+            await asyncio.sleep(wait)
+        except TelegramForbiddenError:
+            logger.info(f"Користувач {user_id} заблокував бота")
+            return
+        except TelegramBadRequest as e:
+            logger.warning(f"Bad request для {user_id}: {e}")
+            return
+        except Exception as e:
+            logger.error(f"Помилка відправки для {user_id}: {e}")
+            return
 
 
 async def start_monitor(bot: Bot, interval: int = 60):

@@ -13,11 +13,6 @@ MAX_WALLETS_PER_USER = 20
 SUPPORTED_CHAINS = {
     "ethereum": "Ethereum",
     "base": "Base",
-    "abstract": "Abstract",
-    "arbitrum": "Arbitrum",
-    "bsc": "BSC",
-    "megaeth": "MegaETH",
-    "tempo": "Tempo",
 }
 
 # User input alias -> internal chain ID
@@ -25,11 +20,4 @@ CHAIN_ALIASES = {
     "eth": "ethereum",
     "ethereum": "ethereum",
     "base": "base",
-    "abstract": "abstract",
-    "arb": "arbitrum",
-    "arbitrum": "arbitrum",
-    "bsc": "bsc",
-    "bnb": "bsc",
-    "megaeth": "megaeth",
-    "tempo": "tempo",
 }

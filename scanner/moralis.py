@@ -1,75 +1,83 @@
 import aiohttp
 import logging
-from config import MORALIS_API_KEY
+from config import ALCHEMY_API_KEY
 
 logger = logging.getLogger(__name__)
 
-MORALIS_BASE = "https://deep-index.moralis.io/api/v2.2"
-
-# Internal chain ID -> Moralis chain param
-MORALIS_CHAIN_MAP = {
-    "ethereum": "eth",
-    "base": "base",
-    "arbitrum": "arbitrum",
-    "bsc": "bsc",
+# Chain -> Alchemy network subdomain
+ALCHEMY_NETWORK_MAP = {
+    "ethereum": "eth-mainnet",
+    "base":     "base-mainnet",
+    "arbitrum": "arb-mainnet",
+    "bsc":      None,  # Alchemy не підтримує BSC
+    "abstract": None,
+    "megaeth":  None,
+    "tempo":    None,
 }
-
-# Chains not yet supported by Moralis
-UNSUPPORTED_CHAINS = {"abstract", "megaeth", "tempo"}
 
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-async def get_wallet_transfers(address: str, chains: list, limit: int = 20) -> list:
+def _base_url(chain: str) -> str | None:
+    network = ALCHEMY_NETWORK_MAP.get(chain)
+    if not network:
+        return None
+    return f"https://{network}.g.alchemy.com/nft/v3/{ALCHEMY_API_KEY}"
+
+
+async def _fetch(url: str, params: dict) -> list:
+    headers = {"accept": "application/json"}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("nftTransfers", [])
+                else:
+                    text = await resp.text()
+                    logger.warning(f"Alchemy {resp.status}: {text[:200]}")
+                    return []
+    except Exception as e:
+        logger.error(f"Alchemy request error: {e}")
+        return []
+
+
+async def get_wallet_transfers(address: str, chains: list, limit: int = 25) -> list:
     """Fetch recent NFT transfers for a wallet across multiple chains."""
     all_transfers = []
 
     for chain in chains:
-        if chain in UNSUPPORTED_CHAINS:
+        base = _base_url(chain)
+        if not base:
             continue
 
-        moralis_chain = MORALIS_CHAIN_MAP.get(chain, chain)
-        url = f"{MORALIS_BASE}/{address}/nft/transfers"
-        params = {
-            "chain": moralis_chain,
-            "limit": limit,
-            "order": "DESC",
-        }
-        headers = {
-            "X-API-Key": MORALIS_API_KEY,
-            "accept": "application/json",
-        }
+        url = f"{base}/getTransfersForOwner"
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    params=params,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        transfers = data.get("result", [])
-                        for t in transfers:
-                            t["_chain"] = chain
-                        all_transfers.extend(transfers)
-                    else:
-                        text = await resp.text()
-                        logger.warning(f"Moralis {resp.status} for {address} on {chain}: {text[:200]}")
-        except aiohttp.ClientError as e:
-            logger.error(f"Moralis request error for {address} on {chain}: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error fetching transfers for {address} on {chain}: {e}")
+        # Отримуємо вхідні (mint/buy) та вихідні (sell) окремо
+        for transfer_type in ("TO", "FROM"):
+            transfers = await _fetch(url, {
+                "owner": address,
+                "transferType": transfer_type,
+                "pageSize": limit,
+                "withMetadata": "true",
+            })
+            for t in transfers:
+                t["_chain"] = chain
+            all_transfers.extend(transfers)
 
     return all_transfers
 
 
 def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
-    """Parse a Moralis NFT transfer into a clean event dict."""
+    """Parse an Alchemy NFT transfer into a clean event dict."""
     try:
-        from_addr = (transfer.get("from_address") or "").lower()
-        to_addr = (transfer.get("to_address") or "").lower()
+        from_addr = (transfer.get("from") or "").lower()
+        to_addr = (transfer.get("to") or "").lower()
         wallet = wallet_address.lower()
 
         if from_addr == ZERO_ADDRESS:
@@ -82,31 +90,29 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
             return None
 
         nft_name = (
-            (transfer.get("normalized_metadata") or {}).get("name")
-            or transfer.get("name")
+            transfer.get("title")
+            or transfer.get("tokenName")
             or "Unknown NFT"
         )
 
-        value = transfer.get("value")
-        price = None
-        if value and value != "0":
-            try:
-                price = int(value) / (10 ** 18)
-            except (ValueError, TypeError):
-                pass
+        # ERC1155 може мати кілька токенів в одній транзакції
+        erc1155 = transfer.get("erc1155Metadata") or []
+        quantity = sum(int(m.get("value", 1)) for m in erc1155) if erc1155 else 1
 
         chain = transfer.get("_chain") or ""
-        tx_hash = transfer.get("transaction_hash") or ""
-        token_id = transfer.get("token_id") or ""
-        quantity = int(transfer.get("amount") or 1)
-        contract_address = transfer.get("token_address") or ""
-        block_timestamp = transfer.get("block_timestamp") or ""
+        tx_hash = transfer.get("hash") or ""
+        token_id = str(transfer.get("tokenId") or "")
+        contract_address = transfer.get("contractAddress") or ""
+
+        # Час транзакції
+        metadata = transfer.get("metadata") or {}
+        block_timestamp = metadata.get("blockTimestamp") or ""
 
         return {
             "event_type": event_type,
             "nft_name": nft_name,
             "collection_name": nft_name,
-            "price": price,
+            "price": None,
             "symbol": "ETH",
             "marketplace": "",
             "chain": chain,
@@ -117,5 +123,5 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
             "block_timestamp": block_timestamp,
         }
     except Exception as e:
-        logger.error(f"Error parsing transfer: {e}")
+        logger.error(f"Error parsing Alchemy transfer: {e}")
         return None

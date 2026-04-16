@@ -32,7 +32,7 @@ async def scan_wallets(bot: Bot):
             transfers = await get_wallet_transfers(address, list(data["chains"]))
 
             for transfer in transfers:
-                tx_hash = transfer.get("transaction_hash") or ""
+                tx_hash = transfer.get("hash") or ""
                 chain = transfer.get("_chain") or ""
 
                 if not tx_hash or not chain:

@@ -4,7 +4,7 @@ from config import ALCHEMY_API_KEY
 
 logger = logging.getLogger(__name__)
 
-# Chain -> Alchemy network subdomain
+# Chain -> Alchemy network subdomain (всі використовують один API ключ)
 ALCHEMY_NETWORK_MAP = {
     "ethereum": "eth-mainnet",
     "base":     "base-mainnet",
@@ -18,54 +18,61 @@ ALCHEMY_NETWORK_MAP = {
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-def _base_url(chain: str) -> str | None:
+def _rpc_url(chain: str) -> str | None:
     network = ALCHEMY_NETWORK_MAP.get(chain)
     if not network:
         return None
-    return f"https://{network}.g.alchemy.com/nft/v3/{ALCHEMY_API_KEY}"
+    return f"https://{network}.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
 
 
-async def _fetch(url: str, params: dict) -> list:
-    headers = {"accept": "application/json"}
+async def _asset_transfers(url: str, address: str, direction: str, limit: int) -> list:
+    """Отримати NFT трансфери через alchemy_getAssetTransfers (JSON-RPC)."""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "alchemy_getAssetTransfers",
+        "params": [{
+            f"{direction}Address": address,
+            "fromBlock": "0x0",
+            "toBlock": "latest",
+            "category": ["erc721", "erc1155"],
+            "maxCount": hex(limit),
+            "withMetadata": True,
+            "order": "desc",
+        }]
+    }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(
+            async with session.post(
                 url,
-                params=params,
-                headers=headers,
+                json=payload,
+                headers={"Content-Type": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return data.get("nftTransfers", [])
+                    return (data.get("result") or {}).get("transfers", [])
                 else:
                     text = await resp.text()
-                    logger.warning(f"Alchemy {resp.status}: {text[:200]}")
+                    logger.warning(f"Alchemy {resp.status} ({direction}): {text[:200]}")
                     return []
     except Exception as e:
         logger.error(f"Alchemy request error: {e}")
         return []
 
 
-async def get_wallet_transfers(address: str, chains: list, limit: int = 25) -> list:
-    """Fetch recent NFT transfers for a wallet across multiple chains."""
+async def get_wallet_transfers(address: str, chains: list, limit: int = 20) -> list:
+    """Отримати всі NFT трансфери гаманця по всіх мережах."""
     all_transfers = []
 
     for chain in chains:
-        base = _base_url(chain)
-        if not base:
+        url = _rpc_url(chain)
+        if not url:
             continue
 
-        url = f"{base}/getTransfersForOwner"
-
-        # Отримуємо вхідні (mint/buy) та вихідні (sell) окремо
-        for transfer_type in ("TO", "FROM"):
-            transfers = await _fetch(url, {
-                "owner": address,
-                "transferType": transfer_type,
-                "pageSize": limit,
-                "withMetadata": "true",
-            })
+        # Вхідні (mint/buy) + вихідні (sell)
+        for direction in ("to", "from"):
+            transfers = await _asset_transfers(url, address, direction, limit)
             for t in transfers:
                 t["_chain"] = chain
             all_transfers.extend(transfers)
@@ -74,7 +81,7 @@ async def get_wallet_transfers(address: str, chains: list, limit: int = 25) -> l
 
 
 def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
-    """Parse an Alchemy NFT transfer into a clean event dict."""
+    """Перетворити Alchemy трансфер на зручний словник."""
     try:
         from_addr = (transfer.get("from") or "").lower()
         to_addr = (transfer.get("to") or "").lower()
@@ -89,20 +96,27 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
         else:
             return None
 
-        nft_name = (
-            transfer.get("title")
-            or transfer.get("tokenName")
-            or "Unknown NFT"
-        )
+        nft_name = transfer.get("asset") or "Unknown NFT"
 
-        # ERC1155 може мати кілька токенів в одній транзакції
+        # Token ID (може бути hex)
+        raw_id = transfer.get("tokenId") or transfer.get("erc721TokenId") or ""
+        try:
+            token_id = str(int(raw_id, 16)) if str(raw_id).startswith("0x") else str(raw_id)
+        except (ValueError, AttributeError):
+            token_id = str(raw_id)
+
+        # ERC1155 кількість
         erc1155 = transfer.get("erc1155Metadata") or []
-        quantity = sum(int(m.get("value", 1)) for m in erc1155) if erc1155 else 1
+        quantity = sum(int(m.get("value", "0x1"), 16) for m in erc1155) if erc1155 else 1
+
+        contract_address = (transfer.get("rawContract") or {}).get("address") or ""
+
+        # Ціна в ETH
+        value = transfer.get("value")
+        price = float(value) if value else None
 
         chain = transfer.get("_chain") or ""
         tx_hash = transfer.get("hash") or ""
-        token_id = str(transfer.get("tokenId") or "")
-        contract_address = transfer.get("contractAddress") or ""
 
         # Час транзакції
         metadata = transfer.get("metadata") or {}
@@ -112,7 +126,7 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
             "event_type": event_type,
             "nft_name": nft_name,
             "collection_name": nft_name,
-            "price": None,
+            "price": price,
             "symbol": "ETH",
             "marketplace": "",
             "chain": chain,

@@ -110,8 +110,8 @@ async def seed_seen_txs(wallet_address: str, transfers: list):
     """Mark all existing transactions as seen (called when wallet is first added)."""
     async with aiosqlite.connect(DATABASE_PATH) as db:
         for t in transfers:
-            tx_hash = t.get("transaction") or ""
-            chain = t.get("chain") or ""
+            tx_hash = t.get("hash") or ""
+            chain = t.get("_chain") or ""
             if tx_hash and chain:
                 await db.execute(
                     "INSERT OR IGNORE INTO seen_txs (wallet_address, tx_hash, chain) VALUES (?, ?, ?)",

@@ -72,6 +72,7 @@ async def cmd_menu(message: Message, state: FSMContext):
 @router.callback_query(F.data == "main_menu")
 async def cb_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
+    _chain_edit.pop(call.from_user.id, None)  # очищаємо незбережений стан редагування
     await call.message.edit_text(WELCOME_TEXT, parse_mode="HTML", reply_markup=main_menu())
 
 

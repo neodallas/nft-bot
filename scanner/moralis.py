@@ -98,16 +98,21 @@ def parse_transfer(transfer: dict, wallet_address: str) -> dict | None:
 
         nft_name = transfer.get("asset") or "Unknown NFT"
 
-        # Token ID (може бути hex)
-        raw_id = transfer.get("tokenId") or transfer.get("erc721TokenId") or ""
+        # ERC1155 метадані
+        erc1155 = transfer.get("erc1155Metadata") or []
+        quantity = sum(int(m.get("value", "0x1"), 16) for m in erc1155) if erc1155 else 1
+
+        # Token ID: для ERC721 — з tokenId, для ERC1155 — з erc1155Metadata
+        raw_id = (
+            transfer.get("tokenId")
+            or transfer.get("erc721TokenId")
+            or (erc1155[0].get("tokenId") if erc1155 else None)
+            or ""
+        )
         try:
             token_id = str(int(raw_id, 16)) if str(raw_id).startswith("0x") else str(raw_id)
         except (ValueError, AttributeError):
             token_id = str(raw_id)
-
-        # ERC1155 кількість
-        erc1155 = transfer.get("erc1155Metadata") or []
-        quantity = sum(int(m.get("value", "0x1"), 16) for m in erc1155) if erc1155 else 1
 
         contract_address = (transfer.get("rawContract") or {}).get("address") or ""
 

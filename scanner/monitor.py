@@ -1,11 +1,14 @@
 import asyncio
 import logging
+from datetime import datetime, timezone, timedelta
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest, TelegramRetryAfter
 
 from db.database import get_all_wallets, is_tx_seen, mark_tx_seen, cleanup_old_txs
 from scanner.moralis import get_wallet_transfers, parse_transfer
 from bot.messages import format_alert
+
+MAX_TX_AGE_DAYS = 7
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,17 @@ async def scan_wallets(bot: Bot):
 
                 if not tx_hash or not chain:
                     continue
+
+                # Пропускаємо транзакції старші за MAX_TX_AGE_DAYS
+                raw_ts = (transfer.get("metadata") or {}).get("blockTimestamp") or ""
+                if raw_ts:
+                    try:
+                        tx_time = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                        if datetime.now(timezone.utc) - tx_time > timedelta(days=MAX_TX_AGE_DAYS):
+                            await mark_tx_seen(address, tx_hash, chain)
+                            continue
+                    except Exception:
+                        pass
 
                 if await is_tx_seen(address, tx_hash, chain):
                     continue
